@@ -18,6 +18,50 @@ import (
 
 var ()
 
+func configupdateInstaller(w http.ResponseWriter, r *http.Request) {
+	// 接收一个上传的文件然后运行更新器
+	// 并然后重启服务器
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "解析文件出错:"+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 读取文件内容
+
+	gs.HOME.PathJoin(".config").Mkdir()
+	configPath := gs.HOME.PathJoin(".config").PathJoin("node-x.ini")
+
+	// 保存上传的文件
+	_, tmpFile, err := configPath.OpenFile(gs.O_NEW_WRITE)
+	// tmpFileStat, err := tmpFile.Stat()
+	if err != nil {
+		http.Error(w, "Failed to get temporary file information", http.StatusInternalServerError)
+		file.Close()
+		return
+	}
+
+	_, err = io.Copy(tmpFile, file)
+	if err != nil {
+		http.Error(w, "Failed to write to temporary file", http.StatusInternalServerError)
+		return
+	}
+	file.Close()
+	tmpFile.Close()
+
+	// 运行更新器
+	LoadConfig()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "config",
+		"end":    time.Now().Format("2006-01-02 15:04:05"),
+	})
+}
 func updateInstaller(w http.ResponseWriter, r *http.Request) {
 	// 接收一个上传的文件然后运行更新器
 	// 并然后重启服务器
