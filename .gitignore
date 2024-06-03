@@ -1,0 +1,6 @@
+node-x
+t1
+t2
+*.exe
+*.ini
+go.sum
