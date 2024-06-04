@@ -1,16 +1,24 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
+	"log"
+	"net"
 	"net/http"
 	"node-x/utils"
 	"time"
+
+	"node-x/asset"
+
+	"gitee.com/dark.H/gs"
 )
 
 var explorer *utils.Console
 var err error
 var RUNNING_AT = time.Now().Format("2006-01-02 15:04:05")
+var PORT = 31111
 
 func main() {
 	updater := ""
@@ -21,17 +29,67 @@ func main() {
 		fmt.Println("Failed to create browser context:", err)
 		return
 	}
-	LoadConfig()
+	Release()
+	LoadALlConfig()
 	RUNNING_AT = time.Now().Format("2006-01-02 15:04:05")
 
 	http.HandleFunc("/v1/web", webHandler)
+	http.HandleFunc("/v1/text", webTextHandler)
 	http.HandleFunc("/v1/raw", rawHandler)
 	http.HandleFunc("/v1/info", infoHandler)
+	http.HandleFunc("/v1/join", reciveconnect)
 	http.HandleFunc("/v1/install", installHandler)
 	http.HandleFunc("/v1/update", updateInstaller)
 	http.HandleFunc("/v1/config", configupdateInstaller)
 	http.HandleFunc("/v1/png", downloadImgHandler)
+	http.HandleFunc("/v1/search", searcherHandler)
+	http.HandleFunc("/v1/config/upload", jsUpdateInstaller)
 	time.Sleep(3 * time.Second)
-	fmt.Println("Server started on :31111")
-	http.ListenAndServe(":31111", nil)
+	// fmt.Println("Server started on :31111")
+	RunServer(PORT)
+	// http.ListenAndServe(":31111", nil)
+}
+
+func RunServer(port int) {
+	addr := fmt.Sprintf(":%d", port)
+	srv := &http.Server{Addr: addr, Handler: http.DefaultServeMux}
+	// return server.ListenAndServeTLS(certFile, keyFile)
+	certPEMBlock, err := asset.Asset("Res/cert.pem")
+	if err != nil {
+		log.Fatal(err)
+	}
+	keyPEMBlock, err := asset.Asset("Res/key.pem")
+	if err != nil {
+		log.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certPEMBlock, keyPEMBlock)
+	if err != nil {
+		log.Fatal(err)
+	}
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+	// srv.TLSConfig.Certificates =
+	gs.Str(":").Add(port).Color("g").Color("B").Println("Server")
+	for {
+
+		func() {
+			l, err := net.Listen("tcp", addr)
+			if err != nil {
+				fmt.Println("Err Wait 5sec")
+				return
+			}
+			defer l.Close()
+			tlsListener := tls.NewListener(l, config)
+			defer tlsListener.Close()
+			err = srv.Serve(tlsListener)
+			if err != nil {
+				fmt.Println("Err Wait 5sec")
+				time.Sleep(5 * time.Second)
+				err = nil
+			}
+		}()
+		time.Sleep(5 * time.Second)
+		continue
+	}
 }

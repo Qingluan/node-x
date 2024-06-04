@@ -16,6 +16,7 @@ import (
 
 type Options struct {
 	UserAgent string
+	LoadImage bool
 	Proxy     string
 }
 
@@ -55,6 +56,7 @@ func (bc *Console) Open(url string, after func(screenPath string, page playwrigh
 	if bc.Browser.IsConnected() {
 		var page playwright.Page
 		var err error
+		loadingImg := false
 		if options != nil {
 			op := playwright.BrowserNewContextOptions{}
 			if options[0].UserAgent != "" {
@@ -64,6 +66,10 @@ func (bc *Console) Open(url string, after func(screenPath string, page playwrigh
 				op.Proxy = &playwright.Proxy{
 					Server: options[0].Proxy,
 				}
+			}
+			if options[0].LoadImage {
+				loadingImg = true
+
 			}
 			browserContext, err := bc.Browser.NewContext(op)
 			if err != nil {
@@ -88,6 +94,14 @@ func (bc *Console) Open(url string, after func(screenPath string, page playwrigh
 		res, err := page.Goto(url, playwright.PageGotoOptions{
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		})
+		if !loadingImg {
+			page.Route("**/*.(png|jpg|jpeg|gif|svg)", func(route playwright.Route) {
+				if route.Request().ResourceType() == "image" {
+					route.Abort()
+				}
+			})
+		}
+
 		// bc.pages.Set(url, page)
 		if err != nil {
 			bc.PagesErrors[url] = err
