@@ -41,5 +41,5 @@ data => {
         }
         searchItems.push(item);
     }
-    return searchItems;
+    return JSON.stringify(searchItems);
 }

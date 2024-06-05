@@ -85,5 +85,23 @@ data => {
             }        
         }
     }
-    return upload_txt
+    real_pars = upload_txt.split("\n\n\n")
+    output_text_page = ""
+    for(let para of real_pars){
+        if (isEnglishMajority(para)){
+            if (para.split(" ").length < 10){
+                continue
+            }else{
+                output_text_page += "\n"+para.trim()
+            }
+
+        }else{
+            if (para.length < 18 ){
+                continue
+            }else{
+                output_text_page += "\n"+para.trim()
+            }
+        }
+    }
+    return output_text_page
 }
