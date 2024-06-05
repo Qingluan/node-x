@@ -4,3 +4,4 @@ t2
 *.exe
 *.ini
 go.sum
+tmp/*

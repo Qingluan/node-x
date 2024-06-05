@@ -76,29 +76,32 @@ func (bc *Console) Open(url string, after func(screenPath string, page playwrigh
 				bc.BigError = err
 				return bc
 			}
+			defer browserContext.Close()
 			page, err = browserContext.NewPage()
 			if err != nil {
 				bc.BigError = err
 				return bc
 			}
 		} else {
-			page, err = bc.Browser.NewPage()
+			page, err = bc.Browser.NewPage(playwright.BrowserNewPageOptions{})
 			if err != nil {
 				bc.BigError = err
 				return bc
 			}
 		}
-
+		defer page.Close()
 		gs.Str("open:" + url).Color("g").Println("page")
 		st := time.Now()
+		timeOut := float64(50000)
 		res, err := page.Goto(url, playwright.PageGotoOptions{
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			Timeout:   &timeOut,
 		})
 		if !loadingImg {
-			page.Route("**/*.(png|jpg|jpeg|gif|svg)", func(route playwright.Route) {
-				if route.Request().ResourceType() == "image" {
-					route.Abort()
-				}
+			page.Route("**/*.(png|jpg|jpeg|gif|svg|jpg)", func(route playwright.Route) {
+				// if route.Request().ResourceType() == "image" {
+				route.Abort()
+				// }
 			})
 		}
 
@@ -129,6 +132,71 @@ func (bc *Console) Open(url string, after func(screenPath string, page playwrigh
 		bc.Pages[url] = page
 		// res.
 		after(screenPath, page, res)
+	}
+	return bc
+}
+
+func (bc *Console) OpenNoScreen(url string, after func(screenPath string, page playwright.Page, res playwright.Response), options ...Options) *Console {
+	if bc.Browser.IsConnected() {
+		var page playwright.Page
+		var err error
+		loadingImg := false
+		if options != nil {
+			op := playwright.BrowserNewContextOptions{}
+			if options[0].UserAgent != "" {
+				op.UserAgent = &options[0].UserAgent
+			}
+			if options[0].Proxy != "" {
+				op.Proxy = &playwright.Proxy{
+					Server: options[0].Proxy,
+				}
+			}
+			if options[0].LoadImage {
+				loadingImg = true
+
+			}
+			browserContext, err := bc.Browser.NewContext(op)
+			if err != nil {
+				bc.BigError = err
+				return bc
+			}
+			defer browserContext.Close()
+			page, err = browserContext.NewPage()
+			if err != nil {
+				bc.BigError = err
+				return bc
+			}
+		} else {
+			page, err = bc.Browser.NewPage(playwright.BrowserNewPageOptions{})
+			if err != nil {
+				bc.BigError = err
+				return bc
+			}
+		}
+		defer page.Close()
+		// st := time.Now()
+		timeOut := float64(50000)
+		res, err := page.Goto(url, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			Timeout:   &timeOut,
+		})
+		if !loadingImg {
+			page.Route("**/*.(png|jpg|jpeg|gif|svg|jpg)", func(route playwright.Route) {
+				// if route.Request().ResourceType() == "image" {
+				route.Abort()
+				// }
+			})
+		}
+
+		// bc.pages.Set(url, page)
+		if err != nil {
+			bc.PagesErrors[url] = err
+			// return bc
+		}
+		// bc.Pages[url] = page
+		// res.
+		gs.Str("open:" + url).Color("g").Println("page")
+		after("", page, res)
 	}
 	return bc
 }

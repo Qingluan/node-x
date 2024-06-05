@@ -16,13 +16,14 @@ type R struct {
 }
 
 type Searcher struct {
-	Query      string            `json:"script"`
+	Query      string            `json:"query"`
 	Name       string            `json:"name"`
 	URL        string            `json:"url"`
 	Headers    map[string]string `json:"headers"`
 	Proxy      string            `json:"proxy"`
 	Screenshot bool              `json:"screenshot"`
 	LoadImage  bool              `json:"load_image"`
+	Script     string            `json:"script"`
 }
 
 type ConnectRequest struct {
@@ -38,6 +39,8 @@ type SearchItem struct {
 	Title string `json:"title"`
 	Url   string `json:"url"`
 	Desc  string `json:"desc"`
+	Post  string `json:"post"`
+	Date  string `json:"date"`
 }
 
 func RFromJson(data []byte) (r *R, err error) {

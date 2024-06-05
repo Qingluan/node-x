@@ -221,7 +221,7 @@ func webHandler(w http.ResponseWriter, r *http.Request) {
 			if noRole == 0 {
 				go func(url string) {
 					defer lock.Done()
-					explorer.Open(url, func(screenPath string, page playwright.Page, res playwright.Response) {
+					explorer.OpenNoScreen(url, func(screenPath string, page playwright.Page, res playwright.Response) {
 						// execute the script
 						title, _ := page.Title()
 						defer page.Close()
@@ -307,7 +307,7 @@ func webHandler(w http.ResponseWriter, r *http.Request) {
 		lock.Wait()
 
 	} else {
-		explorer.Open(req.URL, func(screenPath string, page playwright.Page, res playwright.Response) {
+		explorer.OpenNoScreen(req.URL, func(screenPath string, page playwright.Page, res playwright.Response) {
 			// execute the script
 			w.Header().Set("Content-Type", "application/json")
 			title, _ := page.Title()
@@ -402,7 +402,7 @@ func webTextHandler(w http.ResponseWriter, r *http.Request) {
 				go func(url string) {
 					defer lock.Done()
 
-					explorer.Open(url, func(screenPath string, page playwright.Page, res playwright.Response) {
+					explorer.OpenNoScreen(url, func(screenPath string, page playwright.Page, res playwright.Response) {
 						// execute the script
 						defer page.Close()
 						title, _ := page.Title()
@@ -485,7 +485,7 @@ func webTextHandler(w http.ResponseWriter, r *http.Request) {
 		lock.Wait()
 
 	} else {
-		explorer.Open(req.URL, func(screenPath string, page playwright.Page, res playwright.Response) {
+		explorer.OpenNoScreen(req.URL, func(screenPath string, page playwright.Page, res playwright.Response) {
 			// execute the script
 			w.Header().Set("Content-Type", "application/json")
 			title, _ := page.Title()
@@ -557,6 +557,8 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 
 func infoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	explorer.Browser.Contexts()
+
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "alive",
 		"start":  RUNNING_AT,
@@ -611,26 +613,61 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
-	searchKey, Scripts := LoadSearchEngine(req.Name)
-	if !gs.Str(searchKey).In("${KEY}") {
+	searchedUrl := gs.Str("")
+	if req.URL == "" {
+		searchKey, Scripts := LoadSearchEngine(req.Name)
+		if !gs.Str(searchKey).In("${KEY}") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(gs.Dict[any]{
+				"name":  req.Name,
+				"query": req.Query,
+				"err":   "no ${KEY} in " + searchKey,
+			})
+			return
+		}
+		if req.Script == "" {
+			req.Script = Scripts
+		}
+		searchedUrl = gs.Str(searchKey).Replace("${KEY}", req.Query)
+	} else {
+		if !gs.Str(req.URL).In("${KEY}") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(gs.Dict[any]{
+				"name":  req.Name,
+				"query": req.Query,
+				"err":   "no ${KEY} in " + req.URL,
+			})
+			return
+		}
+		searchedUrl = gs.Str(req.URL).Replace("${KEY}", req.Query)
+	}
+
+	if req.Script == "" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(gs.Dict[any]{
 			"name":  req.Name,
 			"query": req.Query,
-			"err":   "no ${KEY} in " + searchKey,
+			"err":   "no script",
+		})
+		return
+	}
+	if searchedUrl == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(gs.Dict[any]{
+			"name":  req.Name,
+			"query": req.Query,
+			"err":   "no url",
 		})
 		return
 	}
 
-	searchedUrl := gs.Str(searchKey).Replace("${KEY}", req.Query)
-
-	explorer.Open(searchedUrl.String(), func(sscreenPath string, spage playwright.Page, searchres playwright.Response) {
+	explorer.OpenNoScreen(searchedUrl.String(), func(sscreenPath string, spage playwright.Page, searchres playwright.Response) {
 		// execute the script
 		// w.Header().Set("Content-Type", "application/json")
 		// title, _ := page.Title()
 		defer spage.Close()
-
-		result, err := spage.Evaluate(Scripts)
+		fmt.Println("script:", req.Script)
+		result, err := spage.Evaluate(req.Script)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(gs.Dict[any]{
@@ -640,6 +677,7 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		// fmt.Println("result:", result)
 
 		if items, err := utils.SearchItemsFromJson([]byte(result.(string))); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -660,39 +698,52 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, item := range items {
-
+				// fmt.Println("item", item)
 				lock.Add(1)
 				go func(item *utils.SearchItem) {
 					defer lock.Done()
 					if item.Url != "" {
-						explorer.Open(item.Url, func(screenPath string, page playwright.Page, res playwright.Response) {
+						explorer.OpenNoScreen(item.Url, func(screenPath string, page playwright.Page, res playwright.Response) {
 							defer page.Close()
 							title, _ := page.Title()
 							itemResult, err := page.Evaluate(TEXT_JS)
 							if err != nil {
 
 								json.NewEncoder(w).Encode(gs.Dict[any]{
-									"title": title,
-									"url":   item.Url,
-									"err":   err.Error(),
+									"title":      title,
+									"url":        item.Url,
+									"err":        err.Error(),
+									"screenshot": screenPath,
 								})
 								flusher.Flush()
 								return
 							}
 							json.NewEncoder(w).Encode(gs.Dict[any]{
-								"url":   item.Url,
-								"title": title,
-								"page":  itemResult,
+								"url":        item.Url,
+								"title":      title,
+								"screenshot": screenPath,
+								"page":       itemResult,
 							})
 							flusher.Flush()
 
 						})
+						if err, ok := explorer.PagesErrors[item.Url]; ok && err != nil {
+							gs.Str(err.Error()).Color("r").Println(item.Url)
+							json.NewEncoder(w).Encode(gs.Dict[any]{
+								"url": item.Url,
+								"err": err.Error(),
+							})
+							flusher.Flush()
+							return
+						}
 					}
 
 				}(item)
-				time.Sleep(1 * time.Second)
-				lock.Wait()
+
 			}
+			time.Sleep(1 * time.Second)
+			lock.Wait()
+
 		}
 
 	})

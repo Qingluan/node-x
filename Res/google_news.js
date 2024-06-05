@@ -28,18 +28,39 @@ data => {
         return nodes
     }
 
-    let eles = Xpath("//div/span/a/h3")
+    let eles = Xpath("//a[@data-ved]/div/div")
     let searchItems = [];
-    for(let h3 of eles){
-        let title = h3.textContent.trim();
-        let url = h3.parentElement.href;
-        let desc = h3.parentElement.parentElement.textContent.trim().replace(url,"").replace(title,"").trim();
-        let item = {
-            title: title,
-            url: url,
-            desc: desc
+    for(let div of eles){
+        if (div.children.length > 2 && div.children.length < 5){
+            let post = div.children[0].textContent.trim();
+            let title = div.children[1].textContent.trim();
+            let url = div.parentElement.parentElement.href;
+            let date = div.children[2].textContent.trim();    
+            let item = {
+                title: title,
+                url: url,
+                post: post,
+                date: date,
+            }
+            searchItems.push(item);
+            
+        }else if (div.children.length > 4){
+            let url = div.parentElement.parentElement.href;
+            let post = div.children[0].textContent.trim();
+            let title = div.children[1].textContent.trim();
+            let desc = div.children[2].textContent.trim();
+            let date = div.children[4].textContent.trim();
+            let item = {
+                title: title,
+                url: url,
+                desc: desc,
+                date: date,
+                post: post,
+            }
+            searchItems.push(item);
         }
-        searchItems.push(item);
+        
+        
     }
     return JSON.stringify(searchItems);
 }
