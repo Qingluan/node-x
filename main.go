@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"node-x/utils"
+	"os"
 	"time"
 
 	"node-x/asset"
@@ -22,8 +23,16 @@ var PORT = 31111
 
 func main() {
 	updater := ""
+	daemon := false
 	flag.StringVar(&updater, "update_me_by_updater_this_is_a_tag_has_no_meaning", "", "updater path")
+	flag.BoolVar(&daemon, "d", false, "true to run daemon")
 	flag.Parse()
+
+	if daemon {
+		utils.DaemonLog([]string{os.Args[0]}, "/tmp/node-x.log")
+		time.Sleep(2 * time.Second)
+		os.Exit(0)
+	}
 	explorer, err = utils.NewBrowserContext()
 	if err != nil {
 		fmt.Println("Failed to create browser context:", err)

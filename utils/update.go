@@ -129,3 +129,73 @@ func Daemon(args []string) {
 		return
 	}
 }
+
+func DaemonLog(args []string, logpath string) {
+	// defer os.Remove(LOG_FILE)
+	LOG_FILE := logpath
+	// gs.Str("ps aux | grep linux")
+	ppid := os.Getppid()
+	gs.Str(fmt.Sprint(ppid)).Color("g").Println("Daemon PPID")
+	if os.Getppid() != 0 {
+		createLogFile := func(fileName string) (fd *os.File, err error) {
+			dir := path.Dir(fileName)
+			if _, err = os.Stat(dir); err != nil && os.IsNotExist(err) {
+				if err = os.MkdirAll(dir, 0755); err != nil {
+					return
+				}
+			}
+
+			if fd, err = os.Create(fileName); err != nil {
+				ErrLog(err)
+				return
+			}
+			return
+		}
+		if LOG_FILE != "" {
+			logFd, err := createLogFile(LOG_FILE)
+			if err != nil {
+				ErrLog(err)
+				// InfoLog
+				logFd, err = createLogFile(LOG_FILE + ".bak.log")
+				if err != nil {
+					ErrLog(err)
+					return
+				}
+				// return
+			}
+			defer logFd.Close()
+			InfoLog("ready to start")
+			cmdName := args[0]
+			cmdRun, _ := exec.LookPath(cmdName)
+			InfoLog("found cmd  to start:" + cmdRun)
+			newProc, err := os.StartProcess(cmdRun, args, &os.ProcAttr{
+				Files: []*os.File{logFd, logFd, logFd},
+			})
+
+			InfoLog("create  to start")
+			if err != nil {
+				ErrLog(err)
+				// log.Fatal("daemon error:", err)
+				return
+			}
+			log.Printf("Start-Deamon: run in daemon success, pid: %v\nlog : %s", newProc.Pid, LOG_FILE)
+
+		} else {
+			cmdName := args[0]
+			cmdRun, _ := exec.LookPath(cmdName)
+			newProc, err := os.StartProcess(cmdRun, args, &os.ProcAttr{
+				Files: []*os.File{nil, nil, nil},
+			})
+
+			if err != nil {
+				ErrLog(err)
+				// log.Fatal("daemon error:", err)
+				return
+			}
+			log.Printf("Start-Deamon: run in daemon success, pid: %v\n", newProc.Pid)
+
+		}
+
+		return
+	}
+}
