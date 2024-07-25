@@ -35,6 +35,9 @@ func main() {
 
 	http.HandleFunc("/v1/web", webHandler)
 	http.HandleFunc("/v1/text", webTextHandler)
+	http.HandleFunc("/v1/link", weblinkHandler)
+	http.HandleFunc("/v1/news", webNewsHandler)
+	http.HandleFunc("/v1/burp", webBurpHandler)
 	http.HandleFunc("/v1/raw", rawHandler)
 	http.HandleFunc("/v1/info", infoHandler)
 	http.HandleFunc("/v1/join", reciveconnect)
