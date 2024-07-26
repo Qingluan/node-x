@@ -420,6 +420,7 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 	wait := sync.WaitGroup{}
 	for _, u := range req.URLS {
 		wait.Add(1)
+		fmt.Println("spide:", u)
 		go func(url string) {
 			// get base url from url.
 			// baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
@@ -515,6 +516,9 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 					"content": strings.Join(texts, "\n"),
 					"meta":    attrs,
 				})
+				w.Write([]byte("data: " + be.String()))
+				flush.Flush()
+				return
 			}
 		}(u)
 	}
