@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
@@ -26,6 +27,7 @@ var (
 	NoJavascriptRegex = regexp.MustCompile(`<script[\w\W]+?</script>`)
 	NocssRegex        = regexp.MustCompile(`<style[\w\W]+?</style>`)
 	NoSVG             = regexp.MustCompile(`<svg[\w\W]+?</svg>`)
+	NoIframe          = regexp.MustCompile(`<iframe[\w\W]+?</iframe>`)
 	LinkRegex         = regexp.MustCompile(`<a[\w\W]+?</a>`)
 	HrefRegex         = regexp.MustCompile(`href="([\w\W]+?)"`)
 	LinkTextRegex     = regexp.MustCompile(`>([\w\W]+?)</a>`)
@@ -138,6 +140,74 @@ func configupdateInstaller(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func upgradeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pwdData := gs.Dict[string]{}
+
+	err := json.NewDecoder(r.Body).Decode(&pwdData)
+	if err != nil {
+		http.Error(w, "解析文件出错:"+err.Error(), http.StatusBadRequest)
+		return
+	}
+	pwd := pwdData["pwd"]
+	version := pwdData["version"]
+	if pwd == "H3ll0" {
+		uu := "https://github.com/Qingluan/node-x/releases/download/" + version + "/node-x"
+		updater := DownloadURL(uu)
+		if updater == "" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "version not exists!",
+				"end":    time.Now().Format("2006-01-02 15:04:05"),
+			})
+			return
+		}
+		stat, err := os.Stat(updater.String())
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "url not file :" + err.Error(),
+				"end":    time.Now().Format("2006-01-02 15:04:05"),
+			})
+			return
+		}
+
+		if stat.Size() < 1024*1024 {
+			updater.Rm()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "url not file : too small",
+				"end":    time.Now().Format("2006-01-02 15:04:05"),
+			})
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			http.Error(w, "Failed to get current executable path", http.StatusInternalServerError)
+			// tmpFile.Close()
+
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "upgrading",
+			"end":    time.Now().Format("2006-01-02 15:04:05"),
+		})
+
+		// 运行更新器
+		utils.Uprade(updater.String(), executable)
+		// 退出自己
+		os.Exit(0)
+	} else {
+		http.Error(w, "password wrong!", http.StatusUnauthorized)
+		return
+	}
+
+}
+
 func updateInstaller(w http.ResponseWriter, r *http.Request) {
 	// 接收一个上传的文件然后运行更新器
 	// 并然后重启服务器
@@ -145,54 +215,91 @@ func updateInstaller(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
 	file, _, err := r.FormFile("file")
+	updater := gs.Str("")
+
 	if err != nil {
-		http.Error(w, "解析文件出错:"+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if pwd := r.FormValue("pwd"); pwd != "H3ll0" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"status": "upload failed wrong password failed",
-			"end":    time.Now().Format("2006-01-02 15:04:05"),
-		})
-		return
+		req, err2 := utils.RFromJsonReader(r.Body)
+		if err2 != nil {
+			http.Error(w, "解析文件出错:"+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.URL != "" && req.Headers != nil && req.Headers["pwd"] != "" && req.Headers["pwd"] == "H3ll0" {
+			updater = DownloadURL(req.URL)
+			if updater == "" {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{
+					"status": "url not file url",
+					"end":    time.Now().Format("2006-01-02 15:04:05"),
+				})
+				return
+			}
+			stat, err := os.Stat(updater.String())
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{
+					"status": "url not file :" + err.Error(),
+					"end":    time.Now().Format("2006-01-02 15:04:05"),
+				})
+				return
+			}
+
+			if stat.Size() < 1024*1024 {
+				updater.Rm()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{
+					"status": "url not file : too small",
+					"end":    time.Now().Format("2006-01-02 15:04:05"),
+				})
+			}
+			return
+		}
+	} else {
+		if pwd := r.FormValue("pwd"); pwd != "H3ll0" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "upload failed wrong password failed",
+				"end":    time.Now().Format("2006-01-02 15:04:05"),
+			})
+			return
+		}
+		updater = gs.TMP.PathJoin("updated-installer")
+		if updater.IsExists() {
+			updater.Rm()
+		}
+
+		// 保存上传的文件
+		_, tmpFile, err := updater.OpenFile(gs.O_NEW_WRITE)
+		// tmpFileStat, err := tmpFile.Stat()
+		if err != nil {
+			http.Error(w, "Failed to get temporary file information", http.StatusInternalServerError)
+			file.Close()
+			return
+		}
+
+		_, err = io.Copy(tmpFile, file)
+		if err != nil {
+			http.Error(w, "Failed to write to temporary file", http.StatusInternalServerError)
+			return
+		}
+		file.Close()
+		tmpFile.Close()
 	}
 
 	// 读取文件内容
-
-	updater := gs.TMP.PathJoin("updated-installer")
-	if updater.IsExists() {
-		updater.Rm()
-	}
-
-	// 保存上传的文件
-	_, tmpFile, err := updater.OpenFile(gs.O_NEW_WRITE)
-	// tmpFileStat, err := tmpFile.Stat()
-	if err != nil {
-		http.Error(w, "Failed to get temporary file information", http.StatusInternalServerError)
-		file.Close()
-		return
-	}
-
-	_, err = io.Copy(tmpFile, file)
-	if err != nil {
-		http.Error(w, "Failed to write to temporary file", http.StatusInternalServerError)
-		return
-	}
-	file.Close()
-	tmpFile.Close()
 
 	// 获取当前可执行文件的路径
 	executable, err := os.Executable()
 	if err != nil {
 		http.Error(w, "Failed to get current executable path", http.StatusInternalServerError)
 		file.Close()
-		tmpFile.Close()
+		// tmpFile.Close()
 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "upgrading",
 		"end":    time.Now().Format("2006-01-02 15:04:05"),
@@ -200,9 +307,31 @@ func updateInstaller(w http.ResponseWriter, r *http.Request) {
 
 	// 运行更新器
 	utils.Uprade(updater.String(), executable)
-
 	// 退出自己
 	os.Exit(0)
+}
+
+func DownloadURL(u string) gs.Str {
+	http.DefaultClient = &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+	if res, err := http.Get(u); err == nil {
+		t := gs.TMP.PathJoin("updated-installer")
+		if t.IsExists() {
+			t.Rm()
+		}
+		if f, err := os.OpenFile(t.String(), os.O_CREATE|os.O_WRONLY, os.ModePerm); err == nil {
+			io.Copy(f, res.Body)
+			f.Close()
+			res.Body.Close()
+			return t
+		}
+	}
+	return ""
 }
 
 func webHandler(w http.ResponseWriter, r *http.Request) {
@@ -421,6 +550,7 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, u := range req.URLS {
 		wait.Add(1)
 		fmt.Println("spide:", u)
+		time.Sleep(10 * time.Millisecond)
 		go func(url string) {
 			// get base url from url.
 			// baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
@@ -485,7 +615,9 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				f(tags)
 				nojs := NoJavascriptRegex.ReplaceAllString(string(buf), "")
-				nocss := NocssRegex.ReplaceAllString(nojs, "")
+				noiframe := NoIframe.ReplaceAllString(nojs, "")
+				nocss := NocssRegex.ReplaceAllString(noiframe, "")
+
 				nosvg := NoSVG.ReplaceAllString(nocss, "")
 
 				domDocTest := html.NewTokenizer(strings.NewReader(nosvg))
@@ -511,8 +643,9 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				json.NewEncoder(be).Encode(gs.Dict[any]{
-					"url":     url,
-					"status":  res.Status,
+					"url":    url,
+					"status": res.Status,
+					// "body":    nosvg,
 					"content": strings.Join(texts, "\n"),
 					"meta":    attrs,
 				})
@@ -589,7 +722,8 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				res.Body.Close()
-				nojs := NoJavascriptRegex.ReplaceAllString(string(buf), "")
+				noiframe := NoIframe.ReplaceAllString(string(buf), "")
+				nojs := NoJavascriptRegex.ReplaceAllString(noiframe, "")
 				nocss := NocssRegex.ReplaceAllString(nojs, "")
 				nosvg := NoSVG.ReplaceAllString(nocss, "")
 				links := LinkRegex.FindAllString(nosvg, -1)
@@ -1125,5 +1259,34 @@ func webBurpHandler(w http.ResponseWriter, req *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		return
+	}
+}
+
+func logHandler(w http.ResponseWriter, req *http.Request) {
+	LOGFILE := "/tmp/node-x.log"
+	logfile, err := os.Open(LOGFILE)
+	if err != nil {
+		http.Error(w, "Failed to open log file", http.StatusInternalServerError)
+		return
+	}
+	defer logfile.Close()
+
+	// event stream
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+	linebuffer := bufio.NewReader(logfile)
+	for {
+		line, _, err := linebuffer.ReadLine()
+		if err != nil {
+			break
+		}
+		fmt.Fprintf(w, "data: %s\n", strings.TrimSpace(string(line)))
+		flusher.Flush()
 	}
 }

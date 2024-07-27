@@ -62,7 +62,7 @@ func InfoLog(record string) {
 
 func Daemon(args []string) {
 	// defer os.Remove(LOG_FILE)
-	LOG_FILE := "/tmp/upgrade.log"
+	LOG_FILE := "/tmp/node-x.log"
 	// gs.Str("ps aux | grep linux")
 	ppid := os.Getppid()
 	gs.Str(fmt.Sprint(ppid)).Color("g").Println("Daemon PPID")
