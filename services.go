@@ -649,7 +649,23 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 					"content": strings.Join(texts, "\n"),
 					"meta":    attrs,
 				})
-				w.Write([]byte("data: " + be.String()))
+
+				rawbuf := []byte("data: " + be.String())
+				n, err := w.Write(rawbuf)
+				if err != nil {
+					fmt.Println("reply line err:", err)
+					return
+				}
+				// buf2 := rawbuf[n:]
+				for n != len(rawbuf) {
+					nt, err := w.Write(rawbuf[n:])
+					if err != nil {
+						fmt.Println("reply continue line err:", err)
+						return
+					}
+					n += nt
+				}
+
 				flush.Flush()
 				return
 			}
@@ -706,6 +722,7 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					"status": -1,
 					"err":    err.Error(),
 				})
+				fmt.Println("err:", be.String())
 				w.Write([]byte("data: " + be.String()))
 				flush.Flush()
 			} else {
@@ -718,6 +735,7 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 						"err":    err.Error(),
 					})
 					w.Write([]byte("data: " + be.String()))
+					fmt.Println("err:", be.String())
 					flush.Flush()
 					return
 				}
@@ -758,8 +776,11 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					if title == "" {
 						continue
 					}
-
-					uri := strings.Join(strings.Split(href, "/")[3:], "/")
+					href_fs := strings.Split(href, "/")
+					if len(href_fs) < 3 {
+						continue
+					}
+					uri := strings.Join(href_fs[3:], "/")
 					if len(uri) < 3 {
 						continue
 					}
@@ -781,6 +802,7 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
+					fmt.Println("success href:", href)
 					ls = append(ls, Link{
 						Url:     href,
 						Content: title,
@@ -793,7 +815,21 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					"body":   nosvg,
 					"links":  ls,
 				})
-				w.Write([]byte("data: " + be.String()))
+				rawbuf := []byte("data: " + be.String())
+				n, err := w.Write(rawbuf)
+				if err != nil {
+					fmt.Println("reply line err:", err)
+					return
+				}
+				// buf2 := rawbuf[n:]
+				for n != len(rawbuf) {
+					nt, err := w.Write(rawbuf[n:])
+					if err != nil {
+						fmt.Println("reply continue line err:", err)
+						return
+					}
+					n += nt
+				}
 				flush.Flush()
 			}
 		}(u)
