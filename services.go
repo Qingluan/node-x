@@ -33,9 +33,11 @@ var (
 	LinkTextRegex     = regexp.MustCompile(`>([\w\W]+?)</a>`)
 	TextRegex         = regexp.MustCompile(`>([^<][\w\W]+?)</`)
 	MetaRegex         = regexp.MustCompile(`<meta[\w\W]+?>`)
+	LiRegex           = regexp.MustCompile(`<li\W[\w\W]+?</li>`)
 )
 
 type Link struct {
+	Source  string `json:"source"`
 	Url     string `json:"url"`
 	Content string `json:"content"`
 	Text    string `json:"text"`
@@ -513,7 +515,207 @@ func webHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func IsChinese(r rune) bool {
+	return r >= 0x4e00 && r <= 0x9fff || r >= 0xf900 && r <= 0xfaff ||
+		r >= 0xff00 && r <= 0xffef || r >= 0x3400 && r <= 0x4dbf ||
+		r >= 0x20000 && r <= 0x2a6df || r >= 0x2a700 && r <= 0x2b73f ||
+		r >= 0x2b740 && r <= 0x2b81f || r >= 0x2b820 && r <= 0x2ceaf ||
+		r >= 0xF900
+}
+
 func webNewsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+	req, err := utils.RFromJsonReader(r.Body)
+	if err != nil {
+
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	http.DefaultClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	if len(req.URLS) == 0 && req.URL != "" {
+		req.URLS = append(req.URLS, req.URL)
+	}
+	wait := sync.WaitGroup{}
+	all_resplys := gs.List[gs.Dict[any]]{}
+	for _, u := range req.URLS {
+		wait.Add(1)
+		fmt.Println("spide:", u)
+		time.Sleep(10 * time.Millisecond)
+		go func(url string) {
+			// get base url from url.
+			// baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
+			defer wait.Done()
+			client := http.Client{
+				Timeout: 60 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+			if res, err := client.Do(req); err != nil {
+				fmt.Println(url, ",err:", err)
+			} else {
+				// be := bytes.NewBuffer([]byte{})
+				buf, err := io.ReadAll(res.Body)
+				if err != nil {
+					fmt.Println(url, ",err:", err)
+					return
+				}
+				res.Body.Close()
+				metas := MetaRegex.FindAllString(string(buf), -1)
+				tags, err := html.Parse(bytes.NewBuffer([]byte("<html><head>" + strings.Join(metas, "\n") + "</head><body></body><html>")))
+				if err != nil {
+					if err != nil {
+						fmt.Println(url, ",err:", err)
+						return
+					}
+				}
+				var f func(*html.Node)
+				attrs := gs.Dict[gs.List[string]]{}
+				f = func(n *html.Node) {
+					key := ""
+					val := ""
+					if n.Type == html.ElementNode {
+						if n.Data == "meta" {
+							for _, attr := range n.Attr {
+								if attr.Key == "name" {
+									key = strings.TrimSpace(attr.Val)
+								} else if attr.Key == "property" {
+									key = strings.TrimSpace(attr.Val)
+								} else if attr.Key == "content" {
+									val = strings.TrimSpace(attr.Val)
+								}
+								if key != "" && val != "" {
+									if e, ok := attrs[key]; ok {
+										if val != e[len(e)-1] {
+											e = e.Add(val)
+										}
+										attrs[key] = e
+									} else {
+										attrs[key] = gs.List[string]{val}
+									}
+								}
+							}
+						}
+					}
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						f(c)
+					}
+				}
+				f(tags)
+				nojs := NoJavascriptRegex.ReplaceAllString(string(buf), "")
+				noiframe := NoIframe.ReplaceAllString(nojs, "")
+				nocss := NocssRegex.ReplaceAllString(noiframe, "")
+
+				nosvg := NoSVG.ReplaceAllString(nocss, "")
+				nolink := LinkRegex.ReplaceAllString(nosvg, "")
+
+				domDocTest := html.NewTokenizer(strings.NewReader(nolink))
+				previousStartTokenTest := domDocTest.Token()
+				texts := []string{}
+			loopDomTest:
+				for {
+					tt := domDocTest.Next()
+					switch {
+					case tt == html.ErrorToken:
+						break loopDomTest // End of the document,  done
+					case tt == html.StartTagToken:
+						previousStartTokenTest = domDocTest.Token()
+					case tt == html.TextToken:
+						if previousStartTokenTest.Data == "script" {
+							continue
+						}
+						if previousStartTokenTest.Data == "li" {
+							continue
+						}
+						if previousStartTokenTest.Data == "a" {
+							continue
+						}
+						TxtContent := strings.TrimSpace(html.UnescapeString(string(domDocTest.Text())))
+						// tl := len(TxtContent)
+						cl := 0
+						isch := false
+						other := 0
+						for _, c := range TxtContent {
+							if IsChinese(c) {
+								cl++
+							} else {
+								other++
+							}
+						}
+						if cl*2 > other {
+							isch = true
+						}
+						if isch {
+							if cl < 8 {
+								continue
+							}
+						} else {
+							words := strings.Fields(TxtContent)
+							if len(words) < 10 {
+								continue
+							}
+						}
+
+						// fmt.Println("isch:", isch, "cl:", cl, "ol:", other, "tl:", tl, "txt:", TxtContent)
+
+						texts = append(texts, TxtContent)
+					}
+				}
+
+				all_resplys = append(all_resplys, gs.Dict[any]{
+					"url":    url,
+					"status": res.Status,
+					// "body":    nosvg,
+					"content": strings.Join(texts, "\n"),
+					"meta":    attrs,
+				})
+
+				// rawbuf := []byte("data: " + be.String())
+				// n, err := w.Write(rawbuf)
+				// if err != nil {
+				// 	fmt.Println("reply line err:", err)
+				// 	return
+				// }
+				// buf2 := rawbuf[n:]
+				// for n != len(rawbuf) {
+				// 	nt, err := w.Write(rawbuf[n:])
+				// 	if err != nil {
+				// 		fmt.Println("reply continue line err:", err)
+				// 		return
+				// 	}
+				// 	n += nt
+				// }
+				// flush.Flush()
+				return
+			}
+		}(u)
+	}
+	wait.Wait()
+
+	json.NewEncoder(w).Encode(all_resplys)
+
+}
+
+func webNewsStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -555,7 +757,17 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 			// get base url from url.
 			// baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
 			defer wait.Done()
-			if res, err := http.Get(u); err != nil {
+			client := http.Client{
+				Timeout: 60 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+			if res, err := client.Do(req); err != nil {
 				be := bytes.NewBuffer([]byte{})
 				json.NewEncoder(be).Encode(gs.Dict[any]{
 					"url":    u,
@@ -595,16 +807,27 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				var f func(*html.Node)
 				attrs := gs.Dict[gs.List[string]]{}
 				f = func(n *html.Node) {
+					key := ""
+					val := ""
 					if n.Type == html.ElementNode {
 						if n.Data == "meta" {
 							for _, attr := range n.Attr {
-								if e, ok := attrs[attr.Key]; ok {
-									if attr.Val != e[len(e)-1] {
-										e = e.Add(attr.Val)
+								if attr.Key == "name" {
+									key = strings.TrimSpace(attr.Val)
+								} else if attr.Key == "property" {
+									key = strings.TrimSpace(attr.Val)
+								} else if attr.Key == "content" {
+									val = strings.TrimSpace(attr.Val)
+								}
+								if key != "" && val != "" {
+									if e, ok := attrs[key]; ok {
+										if val != e[len(e)-1] {
+											e = e.Add(val)
+										}
+										attrs[key] = e
+									} else {
+										attrs[key] = gs.List[string]{val}
 									}
-									attrs[attr.Key] = e
-								} else {
-									attrs[attr.Key] = gs.List[string]{attr.Val}
 								}
 							}
 						}
@@ -635,10 +858,41 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 						if previousStartTokenTest.Data == "script" {
 							continue
 						}
-						TxtContent := strings.TrimSpace(html.UnescapeString(string(domDocTest.Text())))
-						if len(TxtContent) > 5 {
-							texts = append(texts, TxtContent)
+						if previousStartTokenTest.Data == "li" {
+							continue
 						}
+						if previousStartTokenTest.Data == "a" {
+							continue
+						}
+						TxtContent := strings.TrimSpace(html.UnescapeString(string(domDocTest.Text())))
+						// tl := len(TxtContent)
+						cl := 0
+						isch := false
+						other := 0
+						for _, c := range TxtContent {
+							if IsChinese(c) {
+								cl++
+							} else {
+								other++
+							}
+						}
+						if cl*2 > other {
+							isch = true
+						}
+						if isch {
+							if cl < 8 {
+								continue
+							}
+						} else {
+							words := strings.Fields(TxtContent)
+							if len(words) < 10 {
+								continue
+							}
+						}
+
+						// fmt.Println("isch:", isch, "cl:", cl, "ol:", other, "tl:", tl, "txt:", TxtContent)
+
+						texts = append(texts, TxtContent)
 					}
 				}
 
@@ -696,6 +950,145 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	// w.Header().Set("Connection", "keep-alive")
+
+	if len(req.URLS) == 0 && req.URL != "" {
+		req.URLS = append(req.URLS, req.URL)
+	}
+	waitg := sync.WaitGroup{}
+	allReplyResponse := gs.List[Link]{}
+	for _, u := range req.URLS {
+		waitg.Add(1)
+		go func(url string) {
+			// get base url from url.
+			baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
+			defer waitg.Done()
+			client := http.Client{
+				Timeout: 60 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+			if res, err := client.Do(req); err != nil {
+				fmt.Println(url, " ,err:", err)
+			} else {
+				buf, err := io.ReadAll(res.Body)
+				if err != nil {
+					fmt.Println(url, " ,err:", err)
+					return
+				}
+				res.Body.Close()
+				noiframe := NoIframe.ReplaceAllString(string(buf), "")
+				nojs := NoJavascriptRegex.ReplaceAllString(noiframe, "")
+				nocss := NocssRegex.ReplaceAllString(nojs, "")
+				nosvg := NoSVG.ReplaceAllString(nocss, "")
+				links := LinkRegex.FindAllString(nosvg, -1)
+				// ls := gs.List[Link]{}
+				for _, llink := range links {
+					href := ""
+					title := ""
+					fs := HrefRegex.FindStringSubmatch(llink)
+					if len(fs) > 0 {
+						href = fs[1]
+					}
+					fs = LinkTextRegex.FindStringSubmatch(llink)
+					if len(fs) > 0 {
+						title = fs[1]
+					}
+
+					title = strings.TrimSpace(title)
+					if strings.HasPrefix(href, "/") {
+						href = baseURL + href
+					} else if !strings.HasPrefix(href, "http") {
+						href = url + href
+					} else if strings.HasPrefix(href, "://") {
+						href = "http" + href
+					}
+
+					if !strings.HasPrefix(href, "http") {
+						continue
+					}
+					if len(strings.TrimPrefix(href, baseURL)) < 6 {
+						continue
+					}
+					if title == "" {
+						continue
+					}
+					href_fs := strings.Split(href, "/")
+					if len(href_fs) < 3 {
+						continue
+					}
+					uri := strings.Join(href_fs[3:], "/")
+					if len(uri) < 3 {
+						continue
+					}
+					fs = strings.Split(uri, ".")
+					ex := fs[len(fs)-1]
+					switch ex {
+					case "jpg", "png", "mp4", "jpeg", "gif":
+						continue
+					}
+					puretext := title
+					if strings.Contains(title, ">") && strings.Contains(title, "<") {
+						puretext = ""
+						fss := TextRegex.FindAllStringSubmatch(title, -1)
+						for _, fi := range fss {
+							for _, ii := range fi {
+								if !strings.Contains(ii, "<") && !strings.Contains(ii, ">") {
+									puretext += "\t" + strings.TrimSpace(ii)
+								}
+							}
+						}
+					}
+					// fmt.Println("success href:", href)
+					allReplyResponse = append(allReplyResponse, Link{
+						Source:  url,
+						Url:     href,
+						Content: title,
+						Text:    strings.TrimSpace(puretext),
+					})
+
+				}
+
+			}
+		}(u)
+
+	}
+	waitg.Wait()
+
+	json.NewEncoder(w).Encode(gs.Dict[any]{
+		"links": allReplyResponse,
+	})
+
+}
+
+func weblinkStreamHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	defer r.Body.Close()
+	req, err := utils.RFromJsonReader(r.Body)
+	if err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	http.DefaultClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -715,7 +1108,17 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 			baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
 
 			defer waitg.Done()
-			if res, err := http.Get(u); err != nil {
+			client := http.Client{
+				Timeout: 60 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+			if res, err := client.Do(req); err != nil {
 				be := bytes.NewBuffer([]byte{})
 				json.NewEncoder(be).Encode(gs.Dict[any]{
 					"url":    u,
