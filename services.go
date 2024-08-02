@@ -929,6 +929,175 @@ func webNewsStreamHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func IsOverDomain(uri string, domain string) bool {
+
+	if strings.Contains(domain, "://") {
+		domain = strings.Split(domain, "/")[2]
+	}
+	if strings.Contains(uri, "://") {
+		uri = strings.Split(uri, "/")[2]
+	}
+
+	fs := strings.Split(domain, ".")
+	baseDo := strings.Join(fs[len(fs)-2:], ".")
+	fs2 := strings.Split(uri, ".")
+	baseUr := strings.Join(fs2[len(fs2)-2:], ".")
+	return strings.Contains(baseDo, baseUr)
+}
+
+func webChannelHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	defer r.Body.Close()
+	req, err := utils.RFromJsonReader(r.Body)
+	if err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	http.DefaultClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	// w.Header().Set("Connection", "keep-alive")
+
+	if len(req.URLS) == 0 && req.URL != "" {
+		req.URLS = append(req.URLS, req.URL)
+	}
+	waitg := sync.WaitGroup{}
+	allReplyResponse := gs.List[Link]{}
+	for _, u := range req.URLS {
+		waitg.Add(1)
+		go func(url string) {
+			// get base url from url.
+			baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
+			defer waitg.Done()
+			client := http.Client{
+				Timeout: 60 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+			}
+			req, _ := http.NewRequest("GET", url, nil)
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+			if res, err := client.Do(req); err != nil {
+				fmt.Println(url, " ,err:", err)
+			} else {
+				buf, err := io.ReadAll(res.Body)
+				if err != nil {
+					fmt.Println(url, " ,err:", err)
+					return
+				}
+				res.Body.Close()
+				noiframe := NoIframe.ReplaceAllString(string(buf), "")
+				nojs := NoJavascriptRegex.ReplaceAllString(noiframe, "")
+				nocss := NocssRegex.ReplaceAllString(nojs, "")
+				nosvg := NoSVG.ReplaceAllString(nocss, "")
+				links := LinkRegex.FindAllString(nosvg, -1)
+				// ls := gs.List[Link]{}
+				for _, llink := range links {
+					href := ""
+					title := ""
+					fs := HrefRegex.FindStringSubmatch(llink)
+					if len(fs) > 0 {
+						href = fs[1]
+					}
+					fs = LinkTextRegex.FindStringSubmatch(llink)
+					if len(fs) > 0 {
+						title = fs[1]
+					}
+
+					title = strings.TrimSpace(title)
+					if strings.HasPrefix(href, "/") {
+						href = baseURL + href
+					} else if !strings.HasPrefix(href, "http") {
+						href = url + href
+					} else if strings.HasPrefix(href, "://") {
+						href = "http" + href
+					}
+
+					if !strings.HasPrefix(href, "http") {
+						continue
+					}
+					e := allReplyResponse.Any(func(no int, i Link) bool {
+						return i.Url == href
+					})
+					if e.Url != "" {
+						continue
+					}
+					href_fs := strings.Split(href, "/")
+					if len(href_fs) < 3 {
+						continue
+					}
+					uri := strings.Join(href_fs[3:], "/")
+					if len(uri) < 3 {
+						continue
+					}
+					fs = strings.Split(uri, ".")
+					ex := fs[len(fs)-1]
+					switch ex {
+					case "jpg", "png", "mp4", "jpeg", "gif":
+						continue
+					}
+					if len(strings.TrimPrefix(href, baseURL)) > 20 {
+						continue
+					}
+					if title == "" {
+						continue
+					}
+					if len(title) > 21 {
+						continue
+					}
+					if !IsOverDomain(href, url) {
+						continue
+					}
+
+					puretext := title
+					if strings.Contains(title, ">") && strings.Contains(title, "<") {
+						puretext = ""
+						fss := TextRegex.FindAllStringSubmatch(title, -1)
+						for _, fi := range fss {
+							for _, ii := range fi {
+								if !strings.Contains(ii, "<") && !strings.Contains(ii, ">") {
+									puretext += "\t" + strings.TrimSpace(ii)
+								}
+							}
+						}
+					}
+
+					// fmt.Println("success href:", href)
+					allReplyResponse = append(allReplyResponse, Link{
+						Source:  url,
+						Url:     href,
+						Content: title,
+						Text:    strings.TrimSpace(puretext),
+					})
+
+				}
+
+			}
+		}(u)
+
+	}
+	waitg.Wait()
+
+	json.NewEncoder(w).Encode(gs.Dict[any]{
+		"links": allReplyResponse,
+	})
+
+}
+
 func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1017,6 +1186,7 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					if len(strings.TrimPrefix(href, baseURL)) < 6 {
 						continue
 					}
+
 					if title == "" {
 						continue
 					}
@@ -1032,6 +1202,9 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					ex := fs[len(fs)-1]
 					switch ex {
 					case "jpg", "png", "mp4", "jpeg", "gif":
+						continue
+					}
+					if !IsOverDomain(href, url) {
 						continue
 					}
 					puretext := title

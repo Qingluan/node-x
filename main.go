@@ -44,6 +44,7 @@ func main() {
 
 	http.HandleFunc("/v1/web", webHandler)
 	http.HandleFunc("/v1/text", webTextHandler)
+	http.HandleFunc("/v1/channel", webChannelHandler)
 	http.HandleFunc("/v1/link", weblinkHandler)
 	http.HandleFunc("/v1/link/stream", weblinkStreamHandler)
 	http.HandleFunc("/v1/news", webNewsHandler)
