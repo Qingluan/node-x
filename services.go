@@ -34,6 +34,7 @@ var (
 	TextRegex         = regexp.MustCompile(`>([^<][\w\W]+?)</`)
 	MetaRegex         = regexp.MustCompile(`<meta[\w\W]+?>`)
 	LiRegex           = regexp.MustCompile(`<li\W[\w\W]+?</li>`)
+	TitleRegex        = regexp.MustCompile(`<title[\w\W]+?</title>`)
 )
 
 type Link struct {
@@ -568,12 +569,17 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 					},
 				},
 			}
-			req, _ := http.NewRequest("GET", url, nil)
+			req, erru := http.NewRequest("GET", url, nil)
+			if erru != nil {
+				fmt.Println("[Fatal]err in new request:", erru)
+				return
+			}
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 			if res, err := client.Do(req); err != nil {
 				fmt.Println(url, ",err:", err)
 			} else {
 				// be := bytes.NewBuffer([]byte{})
+				title := ""
 				buf, err := io.ReadAll(res.Body)
 				if err != nil {
 					fmt.Println(url, ",err:", err)
@@ -621,6 +627,16 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				f(tags)
+				title = TitleRegex.FindString(string(buf))
+
+				fsf := strings.SplitN(title, ">", 2)
+				if len(fsf) == 2 {
+					title = fsf[1]
+				}
+				fsf = strings.SplitN(title, "<", 2)
+				if len(fsf) == 2 {
+					title = fsf[0]
+				}
 				nojs := NoJavascriptRegex.ReplaceAllString(string(buf), "")
 				noiframe := NoIframe.ReplaceAllString(nojs, "")
 				nocss := NocssRegex.ReplaceAllString(noiframe, "")
@@ -631,6 +647,7 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				domDocTest := html.NewTokenizer(strings.NewReader(nolink))
 				previousStartTokenTest := domDocTest.Token()
 				texts := []string{}
+
 			loopDomTest:
 				for {
 					tt := domDocTest.Next()
@@ -649,6 +666,13 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 						if previousStartTokenTest.Data == "a" {
 							continue
 						}
+						if previousStartTokenTest.Data == "title" {
+							if title == "" {
+								title = strings.TrimSpace(html.UnescapeString(string(domDocTest.Text())))
+							}
+							continue
+						}
+
 						TxtContent := strings.TrimSpace(html.UnescapeString(string(domDocTest.Text())))
 						// tl := len(TxtContent)
 						cl := 0
@@ -682,9 +706,9 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				all_resplys = append(all_resplys, gs.Dict[any]{
-					"url":    url,
-					"status": res.Status,
-					// "body":    nosvg,
+					"url":     url,
+					"status":  res.Status,
+					"title":   title,
 					"content": strings.Join(texts, "\n"),
 					"meta":    attrs,
 				})
@@ -1044,10 +1068,18 @@ func webChannelHandler(w http.ResponseWriter, r *http.Request) {
 					if len(uri) < 3 {
 						continue
 					}
-					fs = strings.Split(uri, ".")
+					fs = strings.Split(uri, "/")
+					lastFile := fs[len(fs)-1]
+					fs = strings.Split(lastFile, ".")
 					ex := fs[len(fs)-1]
+					if strings.Contains(ex, "?") {
+						ex = strings.Split(ex, "?")[0]
+					}
 					switch ex {
-					case "jpg", "png", "mp4", "jpeg", "gif":
+					case "jpg", "png", "icon", "svg", "ico", "raw", "mp4", "jpeg", "gif", "pdf", "docx", "doc", "xlsx", "xls", "zip", "rar":
+						continue
+					}
+					if !IsOverDomain(href, url) {
 						continue
 					}
 					if len(strings.TrimPrefix(href, baseURL)) > 20 {
@@ -1057,9 +1089,6 @@ func webChannelHandler(w http.ResponseWriter, r *http.Request) {
 						continue
 					}
 					if len(title) > 21 {
-						continue
-					}
-					if !IsOverDomain(href, url) {
 						continue
 					}
 
@@ -1198,10 +1227,15 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 					if len(uri) < 3 {
 						continue
 					}
-					fs = strings.Split(uri, ".")
+					fs = strings.Split(uri, "/")
+					lastFile := fs[len(fs)-1]
+					fs = strings.Split(lastFile, ".")
 					ex := fs[len(fs)-1]
+					if strings.Contains(ex, "?") {
+						ex = strings.Split(ex, "?")[0]
+					}
 					switch ex {
-					case "jpg", "png", "mp4", "jpeg", "gif":
+					case "jpg", "png", "icon", "svg", "ico", "raw", "mp4", "jpeg", "gif", "pdf", "docx", "doc", "xlsx", "xls", "zip", "rar":
 						continue
 					}
 					if !IsOverDomain(href, url) {
