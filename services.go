@@ -28,7 +28,7 @@ var (
 	NocssRegex        = regexp.MustCompile(`<style[\w\W]+?</style>`)
 	NoSVG             = regexp.MustCompile(`<svg[\w\W]+?</svg>`)
 	NoIframe          = regexp.MustCompile(`<iframe[\w\W]+?</iframe>`)
-	LinkRegex         = regexp.MustCompile(`<a[\w\W]+?</a>`)
+	LinkRegex         = regexp.MustCompile(`<a [\w\W]+?</a>`)
 	HrefRegex         = regexp.MustCompile(`href="([\w\W]+?)"`)
 	LinkTextRegex     = regexp.MustCompile(`>([\w\W]+?)</a>`)
 	TextRegex         = regexp.MustCompile(`>([^<][\w\W]+?)</`)
