@@ -555,7 +555,7 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 	all_resplys := gs.List[gs.Dict[any]]{}
 	for _, u := range req.URLS {
 		wait.Add(1)
-		fmt.Println("spide:", u)
+		fmt.Println("spide :", u)
 		time.Sleep(10 * time.Millisecond)
 		go func(url string) {
 			// get base url from url.
@@ -1002,9 +1002,14 @@ func webChannelHandler(w http.ResponseWriter, r *http.Request) {
 	for _, u := range req.URLS {
 		waitg.Add(1)
 		go func(url string) {
-			// get base url from url.
-			baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
 			defer waitg.Done()
+			// get base url from url.
+			url_fs := strings.Split(url, "/")
+			if len(url_fs) < 3 {
+				return
+			}
+			baseURL := strings.Join(url_fs[:3], "/")
+
 			client := http.Client{
 				Timeout: 60 * time.Second,
 				Transport: &http.Transport{
@@ -1076,7 +1081,7 @@ func webChannelHandler(w http.ResponseWriter, r *http.Request) {
 						ex = strings.Split(ex, "?")[0]
 					}
 					switch ex {
-					case "jpg", "png", "icon", "svg", "ico", "raw", "mp4", "jpeg", "gif", "pdf", "docx", "doc", "xlsx", "xls", "zip", "rar":
+					case "jpg", "png", "icon", "svg", "ico", "raw", "mp4", "jpeg", "gif", "pdf", "docx", "doc", "xlsx", "xls", "zip", "rar", "avi", "mp3", "mkv":
 						continue
 					}
 					if !IsOverDomain(href, url) {
@@ -1161,8 +1166,13 @@ func weblinkHandler(w http.ResponseWriter, r *http.Request) {
 		waitg.Add(1)
 		go func(url string) {
 			// get base url from url.
-			baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
 			defer waitg.Done()
+			url_fs := strings.Split(url, "/")
+			if len(url_fs) < 3 {
+				return
+			}
+			baseURL := strings.Join(url_fs[:3], "/")
+
 			client := http.Client{
 				Timeout: 60 * time.Second,
 				Transport: &http.Transport{
@@ -1311,10 +1321,14 @@ func weblinkStreamHandler(w http.ResponseWriter, r *http.Request) {
 	for _, u := range req.URLS {
 		waitg.Add(1)
 		go func(url string) {
-			// get base url from url.
-			baseURL := strings.Join(strings.Split(url, "/")[:3], "/")
-
 			defer waitg.Done()
+			// get base url from url.
+			url_fs := strings.Split(url, "/")
+			if len(url_fs) < 3 {
+				return
+			}
+			baseURL := strings.Join(url_fs[:3], "/")
+
 			client := http.Client{
 				Timeout: 60 * time.Second,
 				Transport: &http.Transport{
