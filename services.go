@@ -36,6 +36,8 @@ var (
 	LiRegex           = regexp.MustCompile(`<li\W[\w\W]+?</li>`)
 	TimeRegex         = regexp.MustCompile(`<time[\w\W]+?</time>`)
 	TitleRegex        = regexp.MustCompile(`<title[\w\W]+?</title>`)
+	FooterRegex       = regexp.MustCompile(`<footer[\w\W]+?</footer>`)
+	FootRegex         = regexp.MustCompile(`<foot[\w\W]+?</foot>`)
 )
 
 type Link struct {
@@ -644,15 +646,17 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 
 				nosvg := NoSVG.ReplaceAllString(nocss, "")
 				nolink := LinkRegex.ReplaceAllString(nosvg, "")
+				nofooter := FooterRegex.ReplaceAllString(nolink, "")
+				nofoot := FootRegex.ReplaceAllString(nofooter, "")
 				backupTime := []string{}
-				for _, r := range TimeRegex.FindAllString(nolink, -1) {
+				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
 					fs := strings.Split(r, ">")
 					if len(fs) > 1 {
 						fs2 := strings.Split(fs[1], "</time")
 						backupTime = append(backupTime, fs2[0])
 					}
 				}
-				domDocTest := html.NewTokenizer(strings.NewReader(nolink))
+				domDocTest := html.NewTokenizer(strings.NewReader(nofoot))
 				previousStartTokenTest := domDocTest.Token()
 				texts := []string{}
 
@@ -875,16 +879,19 @@ func webNewsStreamHandler(w http.ResponseWriter, r *http.Request) {
 				nocss := NocssRegex.ReplaceAllString(noiframe, "")
 
 				nosvg := NoSVG.ReplaceAllString(nocss, "")
-				noLink := LinkRegex.ReplaceAllString(nosvg, "")
+
+				nolink := LinkRegex.ReplaceAllString(nosvg, "")
+				nofooter := FooterRegex.ReplaceAllString(nolink, "")
+				nofoot := FootRegex.ReplaceAllString(nofooter, "")
 				backupTime := []string{}
-				for _, r := range TimeRegex.FindAllString(noLink, -1) {
+				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
 					fs := strings.Split(r, ">")
 					if len(fs) > 1 {
 						fs2 := strings.Split(fs[1], "</time")
 						backupTime = append(backupTime, fs2[0])
 					}
 				}
-				domDocTest := html.NewTokenizer(strings.NewReader(noLink))
+				domDocTest := html.NewTokenizer(strings.NewReader(nofoot))
 				previousStartTokenTest := domDocTest.Token()
 				texts := []string{}
 			loopDomTest:
