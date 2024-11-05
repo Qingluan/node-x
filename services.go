@@ -647,7 +647,8 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				nosvg := NoSVG.ReplaceAllString(nocss, "")
 				nolink := LinkRegex.ReplaceAllString(nosvg, "")
 				nofooter := FooterRegex.ReplaceAllString(nolink, "")
-				nofoot := FootRegex.ReplaceAllString(nofooter, "")
+				noLi := LiRegex.ReplaceAllString(nofooter, "")
+				nofoot := FootRegex.ReplaceAllString(noLi, "")
 				backupTime := []string{}
 				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
 					fs := strings.Split(r, ">")
@@ -882,7 +883,8 @@ func webNewsStreamHandler(w http.ResponseWriter, r *http.Request) {
 
 				nolink := LinkRegex.ReplaceAllString(nosvg, "")
 				nofooter := FooterRegex.ReplaceAllString(nolink, "")
-				nofoot := FootRegex.ReplaceAllString(nofooter, "")
+				noLi := LiRegex.ReplaceAllString(nofooter, "")
+				nofoot := FootRegex.ReplaceAllString(noLi, "")
 				backupTime := []string{}
 				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
 					fs := strings.Split(r, ">")
