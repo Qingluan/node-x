@@ -48,6 +48,7 @@ func main() {
 	http.HandleFunc("/v1/link", weblinkHandler)
 	http.HandleFunc("/v1/link/stream", weblinkStreamHandler)
 	http.HandleFunc("/v1/news", webNewsHandler)
+	http.HandleFunc("/v1/news/test", webTestHandler)
 	http.HandleFunc("/v1/news/stream", webNewsStreamHandler)
 	http.HandleFunc("/v1/burp", webBurpHandler)
 	http.HandleFunc("/v1/raw", rawHandler)

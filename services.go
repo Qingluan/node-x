@@ -33,12 +33,93 @@ var (
 	LinkTextRegex     = regexp.MustCompile(`>([\w\W]+?)</a>`)
 	TextRegex         = regexp.MustCompile(`>([^<][\w\W]+?)</`)
 	MetaRegex         = regexp.MustCompile(`<meta[\w\W]+?>`)
-	LiRegex           = regexp.MustCompile(`<li\W[\w\W]+?</li>`)
-	TimeRegex         = regexp.MustCompile(`<time[\w\W]+?</time>`)
-	TitleRegex        = regexp.MustCompile(`<title[\w\W]+?</title>`)
-	FooterRegex       = regexp.MustCompile(`<footer[\w\W]+?</footer>`)
-	FootRegex         = regexp.MustCompile(`<foot[\w\W]+?</foot>`)
+	// LiRegex           = regexp.MustCompile(`<li [\w\W]+?</li>`)
+	ULRegex     = regexp.MustCompile(`<ul[\w\W]+?</ul>`)
+	TimeRegex   = regexp.MustCompile(`<time[\w\W]+?</time>`)
+	TitleRegex  = regexp.MustCompile(`<title[\w\W]+?</title>`)
+	FooterRegex = regexp.MustCompile(`<footer[\w\W]+?</footer>`)
+	FootRegex   = regexp.MustCompile(`<foot[\w\W]+?</foot>`)
 )
+
+func removeElement(n *html.Node, tag string) {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && c.Data == tag {
+			n.RemoveChild(c)
+			return // Assuming only one element to remove
+		}
+		removeElement(c, tag)
+	}
+}
+func extractMeta(raw string) (gs.Dict[gs.List[string]], error) {
+	attrs := gs.Dict[gs.List[string]]{}
+	metas := MetaRegex.FindAllString(raw, -1)
+	tags, err := html.Parse(bytes.NewBuffer([]byte("<html><head>" + strings.Join(metas, "\n") + "</head><body></body><html>")))
+	if err != nil {
+		if err != nil {
+
+			return attrs, err
+		}
+	}
+	var f func(*html.Node)
+
+	f = func(n *html.Node) {
+		key := ""
+		val := ""
+		if n.Type == html.ElementNode {
+			if n.Data == "meta" {
+				for _, attr := range n.Attr {
+					if attr.Key == "name" {
+						key = strings.TrimSpace(attr.Val)
+					} else if attr.Key == "property" {
+						key = strings.TrimSpace(attr.Val)
+					} else if attr.Key == "content" {
+						val = strings.TrimSpace(attr.Val)
+					}
+					if key != "" && val != "" {
+						if e, ok := attrs[key]; ok {
+							if val != e[len(e)-1] {
+								e = e.Add(val)
+							}
+							attrs[key] = e
+						} else {
+							attrs[key] = gs.List[string]{val}
+						}
+					}
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(tags)
+	return attrs, nil
+}
+
+func filter_garbage(raw string) string {
+	reader := strings.NewReader(raw)
+	doc, err := html.Parse(reader)
+	if err != nil {
+		panic(err)
+	}
+	removeElement(doc, "head")
+	removeElement(doc, "script")
+	removeElement(doc, "link")
+	removeElement(doc, "style")
+
+	removeElement(doc, "iframe")
+
+	removeElement(doc, "footer")
+	removeElement(doc, "foot")
+
+	removeElement(doc, "svg")
+	removeElement(doc, "ul")
+	removeElement(doc, "a")
+
+	var buf bytes.Buffer
+	html.Render(&buf, doc)
+	return buf.String()
+}
 
 type Link struct {
 	Source  string `json:"source"`
@@ -527,6 +608,61 @@ func IsChinese(r rune) bool {
 		r >= 0xF900
 }
 
+func webTestHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer r.Body.Close()
+	req, err := utils.RFromJsonReader(r.Body)
+	if err != nil {
+
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	http.DefaultClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	if len(req.URLS) == 0 && req.URL != "" {
+		req.URLS = append(req.URLS, req.URL)
+	}
+	client := http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+	r, erru := http.NewRequest("GET", req.URLS[0], nil)
+	if erru != nil {
+		fmt.Println("[Fatal]err in new request:", erru)
+		return
+	}
+	r.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	if res, err := client.Do(r); err != nil {
+		fmt.Println(req.URLS[0], ",err:", err)
+	} else {
+		buf, err := io.ReadAll(res.Body)
+		if err != nil {
+			w.Write([]byte(err.Error()))
+			return
+		}
+		w.Write(buf)
+	}
+	// wait.Wait()
+	// json.NewEncoder(w).Encode(all_resplys)
+}
+
 func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 
@@ -589,47 +725,11 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				res.Body.Close()
-				metas := MetaRegex.FindAllString(string(buf), -1)
-				tags, err := html.Parse(bytes.NewBuffer([]byte("<html><head>" + strings.Join(metas, "\n") + "</head><body></body><html>")))
+				attrs, err := extractMeta(string(buf))
 				if err != nil {
-					if err != nil {
-						fmt.Println(url, ",err:", err)
-						return
-					}
+					fmt.Println(url, ",err:", err)
+					return
 				}
-				var f func(*html.Node)
-				attrs := gs.Dict[gs.List[string]]{}
-				f = func(n *html.Node) {
-					key := ""
-					val := ""
-					if n.Type == html.ElementNode {
-						if n.Data == "meta" {
-							for _, attr := range n.Attr {
-								if attr.Key == "name" {
-									key = strings.TrimSpace(attr.Val)
-								} else if attr.Key == "property" {
-									key = strings.TrimSpace(attr.Val)
-								} else if attr.Key == "content" {
-									val = strings.TrimSpace(attr.Val)
-								}
-								if key != "" && val != "" {
-									if e, ok := attrs[key]; ok {
-										if val != e[len(e)-1] {
-											e = e.Add(val)
-										}
-										attrs[key] = e
-									} else {
-										attrs[key] = gs.List[string]{val}
-									}
-								}
-							}
-						}
-					}
-					for c := n.FirstChild; c != nil; c = c.NextSibling {
-						f(c)
-					}
-				}
-				f(tags)
 				title = TitleRegex.FindString(string(buf))
 
 				fsf := strings.SplitN(title, ">", 2)
@@ -640,15 +740,16 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				if len(fsf) == 2 {
 					title = fsf[0]
 				}
-				nojs := NoJavascriptRegex.ReplaceAllString(string(buf), "")
-				noiframe := NoIframe.ReplaceAllString(nojs, "")
-				nocss := NocssRegex.ReplaceAllString(noiframe, "")
 
-				nosvg := NoSVG.ReplaceAllString(nocss, "")
-				nolink := LinkRegex.ReplaceAllString(nosvg, "")
-				nofooter := FooterRegex.ReplaceAllString(nolink, "")
-				noLi := LiRegex.ReplaceAllString(nofooter, "")
-				nofoot := FootRegex.ReplaceAllString(noLi, "")
+				// noiframe := NoIframe.ReplaceAllString(string(buf), "")
+				// nosvg := NoSVG.ReplaceAllString(noiframe, "")
+				// nocss := NocssRegex.ReplaceAllString(nosvg, "")
+				// nojs := NoJavascriptRegex.ReplaceAllString(nocss, "")
+				// noul := ULRegex.ReplaceAllString(nojs, "")
+				// nolink := LinkRegex.ReplaceAllString(noul, "")
+				// nofooter := FooterRegex.ReplaceAllString(nolink, "")
+				// nofoot := FootRegex.ReplaceAllString(nofooter, "")
+				nofoot := filter_garbage(string(buf))
 				backupTime := []string{}
 				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
 					fs := strings.Split(r, ">")
@@ -828,63 +929,12 @@ func webNewsStreamHandler(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				res.Body.Close()
-				metas := MetaRegex.FindAllString(string(buf), -1)
-				tags, err := html.Parse(bytes.NewBuffer([]byte("<html><head>" + strings.Join(metas, "\n") + "</head><body></body><html>")))
+				attrs, err := extractMeta(string(buf))
 				if err != nil {
-					if err != nil {
-						json.NewEncoder(be).Encode(gs.Dict[any]{
-							"url":    u,
-							"status": res.Status,
-							"err":    err.Error(),
-						})
-						w.Write([]byte("data: " + be.String()))
-						flush.Flush()
-						return
-					}
+					fmt.Println(url, ",err:", err)
+					return
 				}
-				var f func(*html.Node)
-				attrs := gs.Dict[gs.List[string]]{}
-				f = func(n *html.Node) {
-					key := ""
-					val := ""
-					if n.Type == html.ElementNode {
-						if n.Data == "meta" {
-							for _, attr := range n.Attr {
-								if attr.Key == "name" {
-									key = strings.TrimSpace(attr.Val)
-								} else if attr.Key == "property" {
-									key = strings.TrimSpace(attr.Val)
-								} else if attr.Key == "content" {
-									val = strings.TrimSpace(attr.Val)
-								}
-								if key != "" && val != "" {
-									if e, ok := attrs[key]; ok {
-										if val != e[len(e)-1] {
-											e = e.Add(val)
-										}
-										attrs[key] = e
-									} else {
-										attrs[key] = gs.List[string]{val}
-									}
-								}
-							}
-						}
-					}
-					for c := n.FirstChild; c != nil; c = c.NextSibling {
-						f(c)
-					}
-				}
-				f(tags)
-				nojs := NoJavascriptRegex.ReplaceAllString(string(buf), "")
-				noiframe := NoIframe.ReplaceAllString(nojs, "")
-				nocss := NocssRegex.ReplaceAllString(noiframe, "")
-
-				nosvg := NoSVG.ReplaceAllString(nocss, "")
-
-				nolink := LinkRegex.ReplaceAllString(nosvg, "")
-				nofooter := FooterRegex.ReplaceAllString(nolink, "")
-				noLi := LiRegex.ReplaceAllString(nofooter, "")
-				nofoot := FootRegex.ReplaceAllString(noLi, "")
+				nofoot := filter_garbage(string(buf))
 				backupTime := []string{}
 				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
 					fs := strings.Split(r, ">")
