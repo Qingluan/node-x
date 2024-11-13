@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"node-x/utils"
 
 	"gitee.com/dark.H/gs"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/playwright-community/playwright-go"
 	"golang.org/x/net/html"
 )
@@ -39,12 +41,27 @@ var (
 	TitleRegex  = regexp.MustCompile(`<title[\w\W]+?</title>`)
 	FooterRegex = regexp.MustCompile(`<footer[\w\W]+?</footer>`)
 	FootRegex   = regexp.MustCompile(`<foot[\w\W]+?</foot>`)
+	NAMES       = []string{
+		"head",
+		"script",
+		"foot",
+		"footer",
+		"iframe",
+		"link",
+		"style",
+		"svg",
+		"ul",
+		"a",
+	}
 )
 
 func removeElement(n *html.Node, tag string) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == html.ElementNode && c.Data == tag {
-			n.RemoveChild(c)
+		if c.Type == html.ElementNode {
+			if strings.ToLower(c.Data) == strings.ToLower(tag) {
+				n.RemoveChild(c)
+			}
+
 			return // Assuming only one element to remove
 		}
 		removeElement(c, tag)
@@ -96,19 +113,18 @@ func extractMeta(raw string) (gs.Dict[gs.List[string]], error) {
 	return attrs, nil
 }
 
-func filter_garbage(raw string) string {
-	reader := strings.NewReader(raw)
+func filter_garbage_old(raw string) string {
+	nocss := NocssRegex.ReplaceAllString(raw, "")
+	reader := strings.NewReader(nocss)
 	doc, err := html.Parse(reader)
 	if err != nil {
 		panic(err)
 	}
 	removeElement(doc, "head")
+	removeElement(doc, "style")
 	removeElement(doc, "script")
 	removeElement(doc, "link")
-	removeElement(doc, "style")
-
 	removeElement(doc, "iframe")
-
 	removeElement(doc, "footer")
 	removeElement(doc, "foot")
 
@@ -119,6 +135,24 @@ func filter_garbage(raw string) string {
 	var buf bytes.Buffer
 	html.Render(&buf, doc)
 	return buf.String()
+}
+
+func filter_garbage(raw string) string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(raw))
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 使用 CSS 选择器选择要删除的节点，这里选择 class 为 "remove" 的 p 元素
+	for _, name := range NAMES {
+		doc.Find(name).Each(func(i int, s *goquery.Selection) {
+			// 删除选中的节点
+			s.Remove()
+		})
+	}
+	// 输出修改后的 HTML 内容
+	htmlOut, err := doc.Html()
+
+	return htmlOut
 }
 
 type Link struct {
@@ -749,6 +783,7 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 				// nolink := LinkRegex.ReplaceAllString(noul, "")
 				// nofooter := FooterRegex.ReplaceAllString(nolink, "")
 				// nofoot := FootRegex.ReplaceAllString(nofooter, "")
+
 				nofoot := filter_garbage(string(buf))
 				backupTime := []string{}
 				for _, r := range TimeRegex.FindAllString(nofoot, -1) {
@@ -780,6 +815,10 @@ func webNewsHandler(w http.ResponseWriter, r *http.Request) {
 						if previousStartTokenTest.Data == "a" {
 							continue
 						}
+						if previousStartTokenTest.Data == "style" {
+							continue
+						}
+
 						if previousStartTokenTest.Data == "title" {
 							if title == "" {
 								title = strings.TrimSpace(html.UnescapeString(string(domDocTest.Text())))
