@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -507,35 +508,64 @@ func webHandler(w http.ResponseWriter, r *http.Request) {
 								flusher.Flush()
 								return
 							}
+							realRes := ""
+							switch req.Output {
+							case "md", "markdown":
+								realRes = utils.HTMLToMarkdown(result.(string))
+
+							case "google":
+								realRes = utils.HTMLToMarkdown(result.(string), utils.GoogleSearchOption)
+							case "news":
+								realRes = utils.HTMLToMarkdown(result.(string), utils.NewsOption)
+							case "screen", "screenshot", "shot":
+								if buf, err := page.Screenshot(); err == nil {
+									tmpImgBase64 := base64.StdEncoding.EncodeToString(buf)
+									realRes = "data:image/png;base64," + tmpImgBase64
+								} else {
+									realRes = "screenshot error: " + err.Error()
+								}
+							default:
+								realRes = result.(string)
+							}
+							json.NewEncoder(w).Encode(gs.Dict[any]{
+								"url":   url,
+								"title": title,
+								"page":  realRes,
+							})
+							flusher.Flush() // 刷新数据到客户端
+
+						} else {
+							result, err := page.Content()
+							if err != nil {
+								return
+							}
+							realRes := ""
+							switch req.Output {
+							case "md", "markdown":
+								realRes = utils.HTMLToMarkdown(result)
+
+							case "google":
+								realRes = utils.HTMLToMarkdown(result, utils.GoogleSearchOption)
+							case "news":
+								realRes = utils.HTMLToMarkdown(result, utils.NewsOption)
+							case "screen", "screenshot", "shot":
+								if buf, err := page.Screenshot(); err == nil {
+									tmpImgBase64 := base64.StdEncoding.EncodeToString(buf)
+									realRes = "data:image/png;base64," + tmpImgBase64
+								} else {
+									realRes = "screenshot error: " + err.Error()
+								}
+							default:
+								realRes = result
+							}
 
 							json.NewEncoder(w).Encode(gs.Dict[any]{
 								"url":   url,
 								"title": title,
-								"page":  result,
+								"page":  realRes,
 							})
+							flusher.Flush() // 刷新数据到客户端
 
-						} else {
-							if req.Screenshot {
-
-								json.NewEncoder(w).Encode(gs.Dict[any]{
-									"url":        url,
-									"title":      title,
-									"screenshot": screenPath,
-								})
-								flusher.Flush() // 刷新数据到客户端
-
-							} else {
-								html, err := page.Content()
-								if err != nil {
-									return
-								}
-								json.NewEncoder(w).Encode(gs.Dict[any]{
-									"url":   url,
-									"title": title,
-									"page":  html,
-								})
-								flusher.Flush() // 刷新数据到客户端
-							}
 						}
 
 					})
@@ -593,11 +623,29 @@ func webHandler(w http.ResponseWriter, r *http.Request) {
 					// flusher.Flush()
 					return
 				}
+				realRes := ""
+				switch req.Output {
+				case "md", "markdown":
+					realRes = utils.HTMLToMarkdown(result.(string))
 
+				case "google":
+					realRes = utils.HTMLToMarkdown(result.(string), utils.GoogleSearchOption)
+				case "news":
+					realRes = utils.HTMLToMarkdown(result.(string), utils.NewsOption)
+				case "screen", "screenshot", "shot":
+					if buf, err := page.Screenshot(); err == nil {
+						tmpImgBase64 := base64.StdEncoding.EncodeToString(buf)
+						realRes = "data:image/png;base64," + tmpImgBase64
+					} else {
+						realRes = "screenshot error: " + err.Error()
+					}
+				default:
+					realRes = result.(string)
+				}
 				json.NewEncoder(w).Encode(gs.Dict[any]{
 					"url":   req.URL,
 					"title": title,
-					"page":  result,
+					"page":  realRes,
 				})
 
 			} else {
@@ -1882,6 +1930,7 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 		// w.Header().Set("Content-Type", "application/json")
 		// title, _ := page.Title()
 		defer spage.Close()
+
 		fmt.Println("script:", req.Script)
 		result, err := spage.Evaluate(req.Script)
 		if err != nil {
@@ -1893,9 +1942,10 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		res := utils.HTMLToMarkdown(result.(string), utils.GoogleSearchOption)
 		// fmt.Println("result:", result)
 
-		if items, err := utils.SearchItemsFromJson([]byte(result.(string))); err != nil {
+		if items, err := utils.SearchItemMarkdownToJson(res); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(gs.Dict[any]{
 				"name":  req.Name,
@@ -1922,7 +1972,9 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 						explorer.OpenNoScreen(item.Url, func(screenPath string, page playwright.Page, res playwright.Response) {
 							defer page.Close()
 							title, _ := page.Title()
-							itemResult, err := page.Evaluate(TEXT_JS)
+							// itemResult, err := page.Evaluate(TEXT_JS)
+							result, err := page.Content()
+
 							if err != nil {
 
 								json.NewEncoder(w).Encode(gs.Dict[any]{
@@ -1934,14 +1986,15 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 								flusher.Flush()
 								return
 							}
+							realRes := utils.HTMLToMarkdown(result)
+
 							json.NewEncoder(w).Encode(gs.Dict[any]{
 								"url":        item.Url,
 								"title":      title,
 								"screenshot": screenPath,
-								"page":       itemResult,
+								"page":       realRes,
 							})
 							flusher.Flush()
-
 						})
 						if err, ok := explorer.PagesErrors[item.Url]; ok && err != nil {
 							gs.Str(err.Error()).Color("r").Println(item.Url)

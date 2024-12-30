@@ -13,6 +13,7 @@ type R struct {
 	Script     string            `json:"script"`
 	Screenshot bool              `json:"screenshot"`
 	LoadImage  bool              `json:"load_image"`
+	Output     string            `json:"output"`
 }
 
 type Searcher struct {

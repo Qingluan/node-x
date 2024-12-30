@@ -41,6 +41,9 @@ func LoadALlConfig() {
 }
 
 func LoadSearchEngine(name string) (searchUrl string, javascript string) {
+	if name == "google" {
+		return "https://www.google.com/search?q=${KEY}&num=100", ""
+	}
 	cfg, err := ini.Load(CONFIG_PATH)
 	if err == nil {
 		// return
