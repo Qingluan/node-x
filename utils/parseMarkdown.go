@@ -346,14 +346,21 @@ func IsExcludeTag(node *goquery.Selection, excludeTags ...string) bool {
 }
 
 func SearchItemMarkdownToJson(markdownSearch string) (items []*SearchItem, err error) {
+	num := -1
 	for _, line := range strings.Split(markdownSearch, "\n") {
-		if strings.HasPrefix(line, "##") && strings.Contains(line, "(http") && strings.Contains(line, ")") {
-			url := strings.Split(strings.Split(line, "(")[1], ")")[0]
+		if strings.HasPrefix(line, "###") && strings.Contains(line, "(http") && strings.Contains(line, ")") {
+			url := "http" + strings.Split(strings.Split(line, "(http")[1], ")")[0]
 			title := strings.TrimSpace(strings.Split(strings.Split(line, "[")[1], "]")[0])
 			items = append(items, &SearchItem{
 				Title: title,
 				Url:   url,
 			})
+			num += 1
+		} else {
+			if num >= 0 {
+				items[num].Desc += line + "\n"
+			}
+
 		}
 	}
 	return

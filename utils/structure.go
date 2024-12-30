@@ -25,6 +25,7 @@ type Searcher struct {
 	Screenshot bool              `json:"screenshot"`
 	LoadImage  bool              `json:"load_image"`
 	Script     string            `json:"script"`
+	Detail     bool              `json:"detail"`
 }
 
 type ConnectRequest struct {

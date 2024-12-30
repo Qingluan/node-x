@@ -1906,15 +1906,15 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 		searchedUrl = gs.Str(req.URL).Replace("${KEY}", req.Query)
 	}
 
-	if req.Script == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(gs.Dict[any]{
-			"name":  req.Name,
-			"query": req.Query,
-			"err":   "no script",
-		})
-		return
-	}
+	// if req.Script == "" {
+	// 	w.Header().Set("Content-Type", "application/json")
+	// 	json.NewEncoder(w).Encode(gs.Dict[any]{
+	// 		"name":  req.Name,
+	// 		"query": req.Query,
+	// 		"err":   "no script",
+	// 	})
+	// 	return
+	// }
 	if searchedUrl == "" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(gs.Dict[any]{
@@ -1930,20 +1930,42 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 		// w.Header().Set("Content-Type", "application/json")
 		// title, _ := page.Title()
 		defer spage.Close()
+		if req.Script != "" {
+			fmt.Println("script:", req.Script)
 
-		fmt.Println("script:", req.Script)
-		result, err := spage.Evaluate(req.Script)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(gs.Dict[any]{
-				"name":  req.Name,
-				"query": req.Query,
-				"err":   err.Error(),
-			})
-			return
 		}
-		res := utils.HTMLToMarkdown(result.(string), utils.GoogleSearchOption)
-		// fmt.Println("result:", result)
+		var result string
+		var err error
+		if req.Script != "" {
+			result2, err := spage.Evaluate(req.Script)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(gs.Dict[any]{
+					"name":  req.Name,
+					"query": req.Query,
+					"err":   err.Error(),
+				})
+				return
+			}
+			if result2 != nil {
+				result = result2.(string)
+			}
+
+		} else {
+			result, err = spage.Content()
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(gs.Dict[any]{
+					"name":  req.Name,
+					"query": req.Query,
+					"err":   err.Error(),
+				})
+				return
+			}
+		}
+
+		res := utils.HTMLToMarkdown(result, utils.GoogleSearchOption)
+		fmt.Println("result:", res)
 
 		if items, err := utils.SearchItemMarkdownToJson(res); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -1954,6 +1976,14 @@ func searcherHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		} else {
+			if !req.Detail {
+				json.NewEncoder(w).Encode(gs.Dict[any]{
+					"name":  req.Name,
+					"query": req.Query,
+					"items": items,
+				})
+				return
+			}
 			lock := sync.WaitGroup{}
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
